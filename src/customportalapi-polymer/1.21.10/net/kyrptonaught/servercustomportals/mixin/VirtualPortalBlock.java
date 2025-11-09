@@ -16,13 +16,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.spongepowered.asm.mixin.Mixin;
+import xyz.nucleoid.packettweaker.PacketContext;
 
 // See https://github.com/kyrptonaught/CustomPortalApi-Polymer/blob/1.18/src/main/java/net/kyrptonaught/servercustomportals/mixin/VirtualPortalBlock.java
-// Adapted for polymer-core API
+// Adapted for polymer-core API for MC 1.21.10
 @Mixin(CustomPortalBlock.class)
-public class VirtualPortalBlock implements PolymerBlock {
+public abstract class VirtualPortalBlock implements PolymerBlock {
 
-    @Override
     public Block getPolymerBlock(BlockState state) {
         Direction.Axis dir = CustomPortalHelper.getAxisFrom(state);
         if (dir == Direction.Axis.Y)
@@ -30,8 +30,7 @@ public class VirtualPortalBlock implements PolymerBlock {
         return Blocks.NETHER_PORTAL;
     }
 
-    @Override
-    public BlockState getPolymerBlockState(BlockState state) {
+    public BlockState getPolymerBlockState(BlockState state, PacketContext context) {
         Direction.Axis dir = CustomPortalHelper.getAxisFrom(state);
         if (dir == Direction.Axis.Y)
             return Blocks.END_PORTAL.getDefaultState();
@@ -42,7 +41,6 @@ public class VirtualPortalBlock implements PolymerBlock {
         return this.getPolymerBlock(state).getDefaultState();
     }
 
-    @Override
     public void onPolymerBlockSend(BlockState blockState, BlockPos.Mutable pos, ServerPlayerEntity player) {
         Direction.Axis dir = CustomPortalHelper.getAxisFrom(blockState);
         if (dir == Direction.Axis.Y) {

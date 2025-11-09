@@ -67,6 +67,15 @@ ext.minecraftVersionDefinitions = [
                 customportalapi: '0.0.1-beta64-1.20.2',
                 polymer        : 'polymer-core:0.6.3+1.20.2'
         ]
+        ,
+        '1.21.10': [
+                mappings       : '1.21.10+build.1',        // replace with latest build number from maven.fabricmc.net
+                fabric         : '0.17.2',                 // Fabric Loader for 1.21.9/1.21.10
+                fabricApi      : '0.135.0+1.21.10',        // Fabric API matching 1.21.10
+                owo            : '0.12.15.3+1.21',         // latest owo-lib for 1.21.x
+                customportalapi: 'LOCAL',                  // placeholder; composite build provides the local CPA
+                polymer        : 'polymer-core:0.14.3+1.21.10'  // polymer-core for 1.21.10
+        ],
         // NOTE There is no customportalapi after 1.20.2 and since this one needs an older fabric api,
         // it is probably not worth continuing to newer versions
 ]

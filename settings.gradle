@@ -5,7 +5,16 @@ pluginManagement {
             url = 'https://maven.fabricmc.net/'
         }
         gradlePluginPortal()
+        mavenCentral()
     }
 }
 
 rootProject.name = 'server-portals'
+
+includeBuild('libs/customportalapi') {
+    dependencySubstitution {
+        // When anything asks for net.kyrptonaught:customportalapi,
+        // use the root project of the included build instead.
+        substitute module('net.kyrptonaught:customportalapi') using project(':')
+    }
+}

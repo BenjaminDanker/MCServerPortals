@@ -3,6 +3,8 @@ package de.michiruf.serverportals.versioned;
 import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * @author Michael Ruf
@@ -10,14 +12,24 @@ import net.minecraft.text.Text;
  */
 public class VersionedMessageSender {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("ServerPortals");
+
     public static void send(CommandContext<ServerCommandSource> context, String text) {
-        var source = context.getSource();
-        var serverPlayerEntity = source.getPlayer();
-        if (serverPlayerEntity != null) {
-            serverPlayerEntity.sendMessage(Text.literal(text));
-        } else {
-            // MRU: I am not entirely sure, if sendFeedback or sendError should be the option to go here
-            source.sendFeedback(Text.literal(text), false);
+        try {
+            var source = context.getSource();
+            if (source == null) {
+                LOGGER.error("[VersionedMessageSender] CommandSource is null, cannot send message");
+                return;
+            }
+            
+            var serverPlayerEntity = source.getPlayer();
+            if (serverPlayerEntity != null) {
+                serverPlayerEntity.sendMessage(Text.literal(text), false);
+            } else {
+                source.sendFeedback(Text.literal(text), false);
+            }
+        } catch (Exception e) {
+            LOGGER.error("[VersionedMessageSender] Error sending message: {}", text, e);
         }
     }
 }

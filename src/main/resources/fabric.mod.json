@@ -25,6 +25,10 @@
     {
       "config": "customportalapi-polymer.mixins.json",
       "environment": "server"
+    },
+    {
+      "config": "serverportals.mixins.json",
+      "environment": "server"
     }
   ],
   "depends": {

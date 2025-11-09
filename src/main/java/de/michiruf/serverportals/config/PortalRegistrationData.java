@@ -16,6 +16,8 @@ public final class PortalRegistrationData {
     private String lightWithItemId;
     private int color;
     private String command;
+    private String destinationPortalName;
+    private PortalDestination destination;
 
     @SuppressWarnings("unused")
     // Suppress, because this will be used for serialization
@@ -28,19 +30,32 @@ public final class PortalRegistrationData {
             String lightWithItemId,
             int color,
             String command) {
+        this(index, frameBlockId, lightWithItemId, color, command, null, null);
+    }
+
+    public PortalRegistrationData(
+            String index,
+            String frameBlockId,
+            String lightWithItemId,
+            int color,
+            String command,
+            String destinationPortalName,
+            PortalDestination destination) {
         this.index = index;
         this.frameBlockId = frameBlockId;
         this.lightWithItemId = lightWithItemId;
         this.color = color;
         this.command = command;
+        this.destinationPortalName = destinationPortalName;
+        this.destination = destination;
     }
 
     public Block frameBlock() {
-        return VersionedRegistry.block().get(new Identifier(frameBlockId));
+        return VersionedRegistry.block().get(Identifier.tryParse(frameBlockId));
     }
 
     public Item lightWithItem() {
-        return VersionedRegistry.item().get(new Identifier(lightWithItemId));
+        return VersionedRegistry.item().get(Identifier.tryParse(lightWithItemId));
     }
 
     public String index() {
@@ -55,6 +70,14 @@ public final class PortalRegistrationData {
         return command;
     }
 
+    public String destinationPortalName() {
+        return destinationPortalName;
+    }
+
+    public PortalDestination destination() {
+        return destination;
+    }
+
     @Override
     public String toString() {
         return "[" +
@@ -62,6 +85,7 @@ public final class PortalRegistrationData {
                 "frameBlockId=" + frameBlockId + ", " +
                 "lightWithItemId=" + lightWithItemId + ", " +
                 "color=" + color + ", " +
-                "command=" + command + ']';
+                "command=" + command + ", " +
+                "destinationPortalName=" + destinationPortalName + ']';
     }
 }
