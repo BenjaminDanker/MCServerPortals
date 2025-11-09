@@ -6,6 +6,12 @@ import net.minecraft.item.Item;
 import net.minecraft.util.Identifier;
 
 /**
+ * Configuration data for a single portal on this server.
+ * Contains the portal's visual/functional properties and destination information.
+ * 
+ * The x, y, z coordinates (if present in config) represent where players arrive
+ * on the destination server when they use this portal.
+ * 
  * @author Michael Ruf
  * @since 2022-12-19
  */
@@ -17,7 +23,8 @@ public final class PortalRegistrationData {
     private int color;
     private String command;
     private String destinationPortalName;
-    private PortalDestination destination;
+    private String destinationServer;
+    private ArrivalLocation arrivalLocation;
 
     @SuppressWarnings("unused")
     // Suppress, because this will be used for serialization
@@ -30,7 +37,7 @@ public final class PortalRegistrationData {
             String lightWithItemId,
             int color,
             String command) {
-        this(index, frameBlockId, lightWithItemId, color, command, null, null);
+        this(index, frameBlockId, lightWithItemId, color, command, null, null, null);
     }
 
     public PortalRegistrationData(
@@ -40,14 +47,16 @@ public final class PortalRegistrationData {
             int color,
             String command,
             String destinationPortalName,
-            PortalDestination destination) {
+            String destinationServer,
+            ArrivalLocation arrivalLocation) {
         this.index = index;
         this.frameBlockId = frameBlockId;
         this.lightWithItemId = lightWithItemId;
         this.color = color;
         this.command = command;
         this.destinationPortalName = destinationPortalName;
-        this.destination = destination;
+        this.destinationServer = destinationServer;
+        this.arrivalLocation = arrivalLocation;
     }
 
     public Block frameBlock() {
@@ -74,8 +83,12 @@ public final class PortalRegistrationData {
         return destinationPortalName;
     }
 
-    public PortalDestination destination() {
-        return destination;
+    public String destinationServer() {
+        return destinationServer;
+    }
+
+    public ArrivalLocation arrivalLocation() {
+        return arrivalLocation;
     }
 
     @Override
@@ -86,6 +99,48 @@ public final class PortalRegistrationData {
                 "lightWithItemId=" + lightWithItemId + ", " +
                 "color=" + color + ", " +
                 "command=" + command + ", " +
-                "destinationPortalName=" + destinationPortalName + ']';
+                "destinationPortalName=" + destinationPortalName + ", " +
+                "destinationServer=" + destinationServer + ", " +
+                "arrivalLocation=" + arrivalLocation + ']';
+    }
+
+    /**
+     * Represents the arrival coordinates on the destination server.
+     */
+    public static final class ArrivalLocation {
+        private double x;
+        private double y;
+        private double z;
+
+        @SuppressWarnings("unused")
+        private ArrivalLocation() {
+        }
+
+        public ArrivalLocation(double x, double y, double z) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+
+        public double x() {
+            return x;
+        }
+
+        public double y() {
+            return y;
+        }
+
+        public double z() {
+            return z;
+        }
+
+        @Override
+        public String toString() {
+            return "ArrivalLocation{" +
+                    "x=" + x +
+                    ", y=" + y +
+                    ", z=" + z +
+                    '}';
+        }
     }
 }

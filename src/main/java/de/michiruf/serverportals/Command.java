@@ -82,15 +82,15 @@ public class Command {
             if (ServerPortalsMod.CONFIG.portals() != null) {
                 for (de.michiruf.serverportals.config.PortalRegistrationData portal : ServerPortalsMod.CONFIG.portals()) {
                     if (portalName.equals(portal.destinationPortalName())) {
-                        if (portal.destination() != null) {
+                        if (portal.arrivalLocation() != null) {
                             ServerPortalsMod.LOGGER.info("Found matching portal {} (came from: {}) with destination ({}, {}, {})",
                                     portal.index(),
                                     portal.destinationPortalName(),
-                                    portal.destination().x(),
-                                    portal.destination().y(),
-                                    portal.destination().z());
+                                    portal.arrivalLocation().x(),
+                                    portal.arrivalLocation().y(),
+                                    portal.arrivalLocation().z());
 
-                            var dest = portal.destination();
+                            var dest = portal.arrivalLocation();
                             player.setPosition(dest.x(), dest.y(), dest.z());
                             player.networkHandler.requestTeleport(dest.x(), dest.y(), dest.z(),
                                     player.getYaw(), player.getPitch());

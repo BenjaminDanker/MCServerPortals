@@ -110,23 +110,23 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         if (CONFIG.portals() != null) {
             for (de.michiruf.serverportals.config.PortalRegistrationData portal : CONFIG.portals()) {
                 if (portalName.equals(portal.destinationPortalName())) {
-                    if (portal.destination() != null) {
+                    if (portal.arrivalLocation() != null) {
                         LOGGER.info("Teleporting player {} to portal {} at ({}, {}, {})",
                                 player.getName().getString(),
                                 portal.index(),
-                                portal.destination().x(),
-                                portal.destination().y(),
-                                portal.destination().z());
+                                portal.arrivalLocation().x(),
+                                portal.arrivalLocation().y(),
+                                portal.arrivalLocation().z());
                         
             player.setPosition(
-                portal.destination().x(),
-                portal.destination().y(),
-                portal.destination().z()
+                portal.arrivalLocation().x(),
+                portal.arrivalLocation().y(),
+                portal.arrivalLocation().z()
             );
             player.networkHandler.requestTeleport(
-                portal.destination().x(),
-                portal.destination().y(),
-                portal.destination().z(),
+                portal.arrivalLocation().x(),
+                portal.arrivalLocation().y(),
+                portal.arrivalLocation().z(),
                 player.getYaw(),
                 player.getPitch()
             );
@@ -351,7 +351,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 
                 var commandWithSlash = command.startsWith("/") ? command : "/" + command;
                 LOGGER.info("Portal {} sending player {} to server: {}", portal.index(), player.getName().getString(), 
-                           portal.destination() != null ? portal.destination().server() : "unknown");
+                           portal.destinationServer() != null ? portal.destinationServer() : "unknown");
                 
                 // Execute the command on the server's main thread to ensure proper context
                 server.execute(() -> {
