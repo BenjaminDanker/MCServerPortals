@@ -71,6 +71,12 @@ public class Command {
                 ServerPortalsMod.LOGGER.warn("Receive-portal called but source is not a player");
                 return 1;
             }
+
+            if (ServerPortalsMod.shouldSkipReceivePortal(player.getUuid())) {
+                ServerPortalsMod.LOGGER.info("Skipping receive-portal teleport for {} because a recent handoff already moved them",
+                        player.getName().getString());
+                return 0;
+            }
             
             String portalName = StringArgumentType.getString(context, "portalName");
             ServerPortalsMod.LOGGER.info("Player {} will be teleported to portal {}", 

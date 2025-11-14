@@ -108,6 +108,7 @@ public final class PortalRegistrationData {
      * Represents the arrival coordinates on the destination server.
      */
     public static final class ArrivalLocation {
+        private String world;
         private double x;
         private double y;
         private double z;
@@ -120,6 +121,17 @@ public final class PortalRegistrationData {
             this.x = x;
             this.y = y;
             this.z = z;
+        }
+
+        public ArrivalLocation(String world, double x, double y, double z) {
+            this.world = world;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+
+        public String world() {
+            return world;
         }
 
         public double x() {
@@ -137,6 +149,7 @@ public final class PortalRegistrationData {
         @Override
         public String toString() {
             return "ArrivalLocation{" +
+                    "world=" + world + ", " +
                     "x=" + x +
                     ", y=" + y +
                     ", z=" + z +
