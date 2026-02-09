@@ -7,9 +7,11 @@ import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.kyrptonaught.customportalapi.api.CustomPortalBuilder;
 import net.kyrptonaught.customportalapi.util.SHOULDTP;
 import net.minecraft.entity.Entity;
@@ -30,6 +32,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.silver.wakeuplobby.portal.PortalRequestPayloadCodec;
+import com.silver.wakeuplobby.portal.PortalRequestPayload;
+import com.silver.wakeuplobby.portal.PortalRequestSigner;
 
 /**
  * @author Michael Ruf
@@ -67,6 +73,13 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     @Override
     public void onInitializeServer() {
         LOGGER.info("ServerPortals initializing on server");
+
+        try {
+            PayloadTypeRegistry.playS2C().register(PortalRequestPayload.PACKET_ID, PortalRequestPayload.codec);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.debug("Portal request payload type already registered; skipping duplicate registration");
+        }
+
         registerPlayerJoinListener();
         registerLoginHandshake();
         registerLoginHandoffTicker();
@@ -379,8 +392,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                         LOGGER.info("Marked entity as teleported from portal: {}", portal.index());
                     }
                     
-                    LOGGER.info("Executing portal command for {}: {}", portal.index(), portal.command());
-                    executeCommand(entity, portal);
+                        requestProxyTransfer(entity, portal);
                     return SHOULDTP.CANCEL_TP;  // Cancel the teleport since Velocity handles it
                 });
                 
@@ -392,47 +404,55 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         }
     }
 
-    private void executeCommand(Entity entity, PortalRegistrationData portal) {
+    private void requestProxyTransfer(Entity entity, PortalRegistrationData portal) {
         try {
             // Check if entity is a ServerPlayerEntity
             if (entity instanceof net.minecraft.server.network.ServerPlayerEntity player) {
-                MinecraftServer server = player.getCommandSource().getServer();
-                if (server == null) {
-                    LOGGER.error("Server is null");
+                String target = resolveTargetServer(portal);
+                if (target == null || target.isBlank()) {
+                    LOGGER.warn("Portal {} has no resolvable target server; skipping proxy transfer", portal.index());
                     return;
                 }
-                
-                // Append source portal name inside the quotes if available
-                String command = portal.command();
-                if (portal.index() != null && command.contains("\"")) {
-                    // Find last quote and insert portal name before it
-                    int lastQuoteIndex = command.lastIndexOf("\"");
-                    if (lastQuoteIndex > 0) {
-                        command = command.substring(0, lastQuoteIndex) + " " + portal.index() + command.substring(lastQuoteIndex);
-                        LOGGER.info("Appending source portal name '{}' inside command quotes", portal.index());
-                    }
+
+                String secret = CONFIG.portalRequestSecret();
+                if (secret == null || secret.isBlank()) {
+                    LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for portal {}", portal.index());
+                    return;
                 }
-                
-                var commandWithSlash = command.startsWith("/") ? command : "/" + command;
-                LOGGER.info("Portal {} sending player {} to server: {}", portal.index(), player.getName().getString(), 
-                           portal.destinationServer() != null ? portal.destinationServer() : "unknown");
-                
-                // Execute the command on the server's main thread to ensure proper context
-                server.execute(() -> {
-                    try {
-                        LOGGER.info("Executing command on main thread: {}", commandWithSlash);
-                        server.getCommandManager().executeWithPrefix(player.getCommandSource(), commandWithSlash);
-                        LOGGER.info("Command execution completed for portal {}", portal.index());
-                    } catch (Exception e) {
-                        LOGGER.error("Error executing portal command: {}", portal.command(), e);
-                    }
-                });
+
+                String configuredDestinationPortal = portal.destinationPortalName();
+                String sourcePortal;
+                if (configuredDestinationPortal != null && !configuredDestinationPortal.isBlank()) {
+                    sourcePortal = configuredDestinationPortal.trim();
+                } else {
+                    sourcePortal = portal.index() == null ? "" : portal.index();
+                }
+                long issuedAt = System.currentTimeMillis();
+                String nonce = PortalRequestPayloadCodec.generateNonce();
+
+                byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce);
+                byte[] signature = PortalRequestSigner.hmacSha256(secret.trim(), unsigned);
+                byte[] payload = PortalRequestPayloadCodec.encodeSigned(player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce, signature);
+
+                ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
+                LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
             } else {
                 LOGGER.warn("Entity is not a ServerPlayerEntity, cannot execute command");
             }
         } catch (Exception e) {
-            LOGGER.error("Fatal error in executeCommand", e);
+            LOGGER.error("Fatal error in requestProxyTransfer", e);
         }
+    }
+
+    private static String resolveTargetServer(PortalRegistrationData portal) {
+        if (portal == null) {
+            return null;
+        }
+        String dest = portal.destinationServer();
+        if (dest != null && !dest.isBlank()) {
+            return dest.trim();
+        }
+        return null;
     }
 
     /**

@@ -72,6 +72,7 @@ public final class Config {
         ConfigModel defaults = new ConfigModel();
         defaults.logLevel = 0;
         defaults.portals = new ArrayList<>();
+        defaults.portalRequestSecret = "";
         return defaults;
     }
 
@@ -81,6 +82,9 @@ public final class Config {
         }
         if (loaded.portals == null) {
             loaded.portals = new ArrayList<>();
+        }
+        if (loaded.portalRequestSecret == null) {
+            loaded.portalRequestSecret = "";
         }
         return loaded;
     }
@@ -111,6 +115,14 @@ public final class Config {
 
     public void portals(List<PortalRegistrationData> portals) {
         coerce(this.model).portals = portals;
+    }
+
+    public String portalRequestSecret() {
+        return coerce(this.model).portalRequestSecret;
+    }
+
+    public void portalRequestSecret(String secret) {
+        coerce(this.model).portalRequestSecret = secret == null ? "" : secret;
     }
 
     public Path configPath() {
