@@ -51,12 +51,12 @@ Unregister a portal by its index
 
 ## Example configuration file
 
-The configuration is location in `/config/server-portals.json5`.
+The configuration is location in `/config/server-portals.json`.
 Note that changing the configuration while the server is running, will be overwritten by
 commands that configure portals.
 LogLevel is currently unused.
 
-```json5
+```json
 {
   "logLevel": 0,
   "portals": [
