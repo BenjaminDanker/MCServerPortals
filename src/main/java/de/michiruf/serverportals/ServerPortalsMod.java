@@ -355,6 +355,20 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 builder.frameBlock(portal.frameBlock());
                 builder.lightWithItem(portal.lightWithItem());
                 builder.tintColor(portal.color());
+
+                builder.registerPreIgniteEvent((player, world, portalPos, framePos, portalIgnitionSource) -> {
+                    if (!(player instanceof ServerPlayerEntity serverPlayer)) {
+                        LOGGER.info("Blocked portal ignite for {} because igniter is not a player", portal.index());
+                        return false;
+                    }
+
+                    if (!serverPlayer.hasPermissionLevel(1)) {
+                        LOGGER.info("Blocked portal ignite for {} by non-op player {}", portal.index(), serverPlayer.getName().getString());
+                        return false;
+                    }
+
+                    return true;
+                });
                 
                 // Register the event BEFORE registerPortal
                 builder.registerBeforeTPEvent(entity -> {
