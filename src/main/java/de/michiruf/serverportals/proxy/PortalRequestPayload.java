@@ -1,4 +1,4 @@
-package com.silver.wakeuplobby.portal;
+package de.michiruf.serverportals.proxy;
 
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;

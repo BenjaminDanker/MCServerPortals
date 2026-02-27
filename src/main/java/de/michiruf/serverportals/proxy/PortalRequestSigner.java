@@ -1,4 +1,4 @@
-package com.silver.wakeuplobby.portal;
+package de.michiruf.serverportals.proxy;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;

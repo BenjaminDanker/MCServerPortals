@@ -1,4 +1,4 @@
-package com.silver.wakeuplobby.portal;
+package de.michiruf.serverportals.proxy;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;

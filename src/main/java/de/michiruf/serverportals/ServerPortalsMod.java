@@ -33,9 +33,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.silver.wakeuplobby.portal.PortalRequestPayloadCodec;
-import com.silver.wakeuplobby.portal.PortalRequestPayload;
-import com.silver.wakeuplobby.portal.PortalRequestSigner;
+import de.michiruf.serverportals.proxy.PortalRequestPayloadCodec;
+import de.michiruf.serverportals.proxy.PortalRequestPayload;
+import de.michiruf.serverportals.proxy.PortalRequestSigner;
 
 /**
  * @author Michael Ruf
@@ -526,7 +526,6 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         double y = location.y();
         double z = location.z();
 
-        Vec3d position = new Vec3d(x, y, z);
         int chunkX = (int) Math.floor(x) >> 4;
         int chunkZ = (int) Math.floor(z) >> 4;
         boolean chunkLoaded = targetWorld.isChunkLoaded(chunkX, chunkZ);
