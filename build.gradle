@@ -37,6 +37,8 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${minecraftVersionDefinition['fabric']}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${minecraftVersionDefinition['fabricApi']}"
 
+    modImplementation "com.silver:mc-portal-protocol:1.0.0"
+
     // Owo config
     modImplementation annotationProcessor("io.wispforest:owo-lib:${minecraftVersionDefinition['owo']}") { exclude group: 'net.fabricmc.fabric-api' }
     // We could include owo-sentinel for auto download, see https://github.com/wisp-forest/owo-lib

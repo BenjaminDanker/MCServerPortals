@@ -18,3 +18,5 @@ includeBuild('libs/customportalapi') {
         substitute module('net.kyrptonaught:customportalapi') using project(':')
     }
 }
+
+includeBuild('../MC-Mods/Util-Mods/MC-Portal-Protocol')

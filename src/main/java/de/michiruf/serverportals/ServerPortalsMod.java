@@ -7,7 +7,6 @@ import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -33,9 +32,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import de.michiruf.serverportals.proxy.PortalRequestPayloadCodec;
-import de.michiruf.serverportals.proxy.PortalRequestPayload;
-import de.michiruf.serverportals.proxy.PortalRequestSigner;
+import com.silver.portalprotocol.PortalRequestPayloadCodec;
+import com.silver.portalprotocol.PortalRequestPayload;
+import com.silver.portalprotocol.PortalRequestSigner;
 
 /**
  * @author Michael Ruf
@@ -73,12 +72,6 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     @Override
     public void onInitializeServer() {
         LOGGER.info("ServerPortals initializing on server");
-
-        try {
-            PayloadTypeRegistry.playS2C().register(PortalRequestPayload.PACKET_ID, PortalRequestPayload.codec);
-        } catch (IllegalArgumentException ex) {
-            LOGGER.debug("Portal request payload type already registered; skipping duplicate registration");
-        }
 
         registerPlayerJoinListener();
         registerLoginHandshake();

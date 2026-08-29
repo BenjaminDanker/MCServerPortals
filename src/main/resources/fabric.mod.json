@@ -35,6 +35,7 @@
     "minecraft": ">=${minecraft}",
     "fabricloader": ">=${fabric}",
     "fabric": "*",
+    "mc-portal-protocol": ">=1.0.0",
     "owo-lib": ">=0.8.5"
   }
 }
