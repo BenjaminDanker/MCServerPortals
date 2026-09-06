@@ -11,6 +11,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.loader.api.FabricLoader;
 import net.kyrptonaught.customportalapi.api.CustomPortalBuilder;
 import net.kyrptonaught.customportalapi.util.SHOULDTP;
 import net.minecraft.entity.Entity;
@@ -31,6 +32,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.Set;
 
 import com.silver.portalprotocol.PortalRequestPayloadCodec;
 import com.silver.portalprotocol.PortalRequestPayload;
@@ -54,6 +59,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
 
     // Track recent handoff teleports to suppress duplicate receive-portal commands
     private static final Map<UUID, Long> recentHandoffTeleports = new ConcurrentHashMap<>();
+    // Prevent repeated portal ticks while an optional pet authority reservation is in flight.
+    private static final Set<UUID> pendingPetTransferPreparations = ConcurrentHashMap.newKeySet();
     private static final long HANDOFF_RECEIVE_SUPPRESSION_MS = 5_000;
 
     // Queue login handoff teleports to fire after the client finishes its initial chunk sync
@@ -412,42 +419,88 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     }
 
     private void requestProxyTransfer(Entity entity, PortalRegistrationData portal) {
-        try {
-            // Check if entity is a ServerPlayerEntity
-            if (entity instanceof net.minecraft.server.network.ServerPlayerEntity player) {
-                String target = resolveTargetServer(portal);
-                if (target == null || target.isBlank()) {
-                    LOGGER.warn("Portal {} has no resolvable target server; skipping proxy transfer", portal.index());
-                    return;
+        if (!(entity instanceof ServerPlayerEntity player)) {
+            LOGGER.warn("Entity is not a ServerPlayerEntity, cannot execute command");
+            return;
+        }
+        String target = resolveTargetServer(portal);
+        if (target == null || target.isBlank()) {
+            LOGGER.warn("Portal {} has no resolvable target server; skipping proxy transfer", portal.index());
+            return;
+        }
+        if (!pendingPetTransferPreparations.add(player.getUuid())) {
+            return;
+        }
+        prepareOptionalPetTransfer(player, target).whenComplete((ignored, failure) -> {
+            MinecraftServer server = player.getCommandSource().getServer();
+            Runnable continueTransfer = () -> {
+                try {
+                    if (failure != null) {
+                        LOGGER.warn("Optional pet transfer preparation failed for {}; continuing portal transfer with pet left on source", player.getName().getString(), failure);
+                    }
+                    if (!player.isRemoved()) {
+                        sendProxyTransfer(player, portal, target);
+                    }
+                } finally {
+                    pendingPetTransferPreparations.remove(player.getUuid());
                 }
-
-                String secret = CONFIG.portalRequestSecret();
-                if (secret == null || secret.isBlank()) {
-                    LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for portal {}", portal.index());
-                    return;
-                }
-
-                String configuredDestinationPortal = portal.destinationPortalName();
-                String sourcePortal;
-                if (configuredDestinationPortal != null && !configuredDestinationPortal.isBlank()) {
-                    sourcePortal = configuredDestinationPortal.trim();
-                } else {
-                    sourcePortal = portal.index() == null ? "" : portal.index();
-                }
-                long issuedAt = System.currentTimeMillis();
-                String nonce = PortalRequestPayloadCodec.generateNonce();
-
-                byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce);
-                byte[] signature = PortalRequestSigner.hmacSha256(secret.trim(), unsigned);
-                byte[] payload = PortalRequestPayloadCodec.encodeSigned(player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce, signature);
-
-                ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
-                LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
+            };
+            if (server == null) {
+                pendingPetTransferPreparations.remove(player.getUuid());
             } else {
-                LOGGER.warn("Entity is not a ServerPlayerEntity, cannot execute command");
+                server.execute(continueTransfer);
             }
-        } catch (Exception e) {
-            LOGGER.error("Fatal error in requestProxyTransfer", e);
+        });
+    }
+
+    private void sendProxyTransfer(
+            ServerPlayerEntity player, PortalRegistrationData portal, String target) {
+        try {
+            String secret = CONFIG.portalRequestSecret();
+            if (secret == null || secret.isBlank()) {
+                LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for portal {}", portal.index());
+                return;
+            }
+            String configuredDestinationPortal = portal.destinationPortalName();
+            String sourcePortal = configuredDestinationPortal != null
+                    && !configuredDestinationPortal.isBlank()
+                    ? configuredDestinationPortal.trim()
+                    : portal.index() == null ? "" : portal.index();
+            long issuedAt = System.currentTimeMillis();
+            String nonce = PortalRequestPayloadCodec.generateNonce();
+            byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(
+                    player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce);
+            byte[] signature = PortalRequestSigner.hmacSha256(secret.trim(), unsigned);
+            byte[] payload = PortalRequestPayloadCodec.encodeSigned(
+                    player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce, signature);
+            ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
+            LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
+        } catch (Exception failure) {
+            LOGGER.error("Fatal error in sendProxyTransfer", failure);
+        }
+    }
+
+    /**
+     * Optional compatibility hook. ServerPortals keeps owning the canonical signed payload and
+     * proceeds unchanged when Pet Companion is absent or fails before committing a reservation.
+     */
+    private static CompletionStage<?> prepareOptionalPetTransfer(
+            ServerPlayerEntity player, String target) {
+        if (!FabricLoader.getInstance().isModLoaded("pet_companion")) {
+            return CompletableFuture.completedFuture(null);
+        }
+        try {
+            Class<?> petMod = Class.forName("com.silver.aipets.fabric.PetCompanionMod");
+            Object stage = petMod.getMethod(
+                            "preparePortalTransfer", ServerPlayerEntity.class, String.class)
+                    .invoke(null, player, target);
+            if (stage instanceof CompletionStage<?> completionStage) {
+                return completionStage.toCompletableFuture().orTimeout(10, TimeUnit.SECONDS);
+            }
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Pet Companion transfer hook returned a non-stage"));
+        } catch (ReflectiveOperationException failure) {
+            return CompletableFuture.failedFuture(failure);
         }
     }
 
