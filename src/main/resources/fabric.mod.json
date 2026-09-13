@@ -11,19 +11,19 @@
     "website": "https://github.com/michiruf"
   },
   "license": "MIT",
-  "icon": "assets/serverportals/icon.png",
-  "environment": "*",
+  "environment": "server",
   "entrypoints": {
     "server": [
-      "de.michiruf.serverportals.ServerPortalsMod"
-    ],
-    "client": [
       "de.michiruf.serverportals.ServerPortalsMod"
     ]
   },
   "mixins": [
     {
       "config": "customportalapi-polymer.mixins.json",
+      "environment": "server"
+    },
+    {
+      "config": "customportalapi.mixins.json",
       "environment": "server"
     },
     {
@@ -34,8 +34,7 @@
   "depends": {
     "minecraft": ">=${minecraft}",
     "fabricloader": ">=${fabric}",
-    "fabric": "*",
-    "mc-portal-protocol": ">=1.0.0",
-    "owo-lib": ">=0.8.5"
+    "fabric-api": "*",
+    "mc-portal-protocol": ">=1.0.0"
   }
 }

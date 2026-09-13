@@ -1,5 +1,7 @@
 # Server Portals
 
+This source tree targets Minecraft 26.2 only.
+
 Register serverside portals, which can be built using configured blocks, items to light them up and execute a command
 when accessed. Works with vanilla clients. If this mod is installed on the client as well, the portal frame can get
 displayed in different colors configured on the server.

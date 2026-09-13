@@ -6,25 +6,26 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.kyrptonaught.customportalapi.api.CustomPortalBuilder;
+import net.kyrptonaught.customportalapi.CustomPortalsMod;
 import net.kyrptonaught.customportalapi.util.SHOULDTP;
-import net.minecraft.entity.Entity;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
-import net.minecraft.network.packet.s2c.play.PositionFlag;
-import net.minecraft.world.TeleportTarget;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.Relative;
+import net.minecraft.world.level.portal.TeleportTransition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +50,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ServerPortals");
     public static final Config CONFIG = Config.createAndLoad();
-    public static final Identifier PORTAL_HANDOFF_CHANNEL = Identifier.of("serverportals", "portal_handoff");
+    public static final Identifier PORTAL_HANDOFF_CHANNEL = Identifier.fromNamespaceAndPath("serverportals", "portal_handoff");
     
     // Store pending portal teleports: UUID -> (portal name, timestamp)
     private static final Map<UUID, PendingTeleport> pendingPortalTeleports = new ConcurrentHashMap<>();
@@ -79,6 +80,11 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     @Override
     public void onInitializeServer() {
         LOGGER.info("ServerPortals initializing on server");
+
+        // The 26.2 build embeds the server-side CustomPortalAPI classes directly;
+        // bootstrap its registered portal block before registering portal links.
+        CustomPortalsMod mod = new CustomPortalsMod();
+        mod.onInitialize();
 
         registerPlayerJoinListener();
         registerLoginHandshake();
@@ -161,7 +167,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     /**
      * Teleport a player to the destination coordinates of a portal.
      */
-    private static void teleportToPortal(ServerPlayerEntity player, String portalName) {
+    private static void teleportToPortal(ServerPlayer player, String portalName) {
         LOGGER.info("Player {} has pending portal teleport to {}", player.getName().getString(), portalName);
         if (CONFIG.portals() != null) {
             LOGGER.info("Searching for portal named '{}' among {} configured portals", portalName, CONFIG.portals().size());
@@ -175,7 +181,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 if (portalName.equals(portal.destinationPortalName())) {
                     LOGGER.info("  Found match by destinationPortalName: {}", portal.index());
                     if (teleportPlayerToArrival(player, portal, portalName, "login handoff")) {
-                        markRecentHandoffTeleport(player.getUuid());
+                        markRecentHandoffTeleport(player.getUUID());
                         return;
                     }
                 }
@@ -188,7 +194,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 if (portalName.equals(portal.index())) {
                     LOGGER.info("  Found match by index: {}", portal.index());
                     if (teleportPlayerToArrival(player, portal, portalName, "login handoff")) {
-                        markRecentHandoffTeleport(player.getUuid());
+                        markRecentHandoffTeleport(player.getUUID());
                         return;
                     }
                 }
@@ -201,7 +207,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     private void registerLoginHandshake() {
         ServerLoginConnectionEvents.QUERY_START.register((handler, server, sender, sync) -> {
             try {
-                sender.sendPacket(PORTAL_HANDOFF_CHANNEL, PacketByteBufs.empty());
+                sender.sendPacket(PORTAL_HANDOFF_CHANNEL,
+                        new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer()));
                 LOGGER.debug("Sent portal handoff query");
             } catch (Exception ex) {
                 LOGGER.warn("Failed to send portal handoff query", ex);
@@ -222,8 +229,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                             return;
                         }
 
-                        String portalName = buf.readString(32767);
-                        UUID playerId = buf.readUuid();
+                        String portalName = buf.readUtf(32767);
+                        UUID playerId = buf.readUUID();
                         setPendingPortalTeleport(playerId, portalName);
                         LOGGER.info("Stored portal handoff '{}' for {}", portalName, playerId);
                     } catch (Exception ex) {
@@ -238,9 +245,9 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
 
         // Apply handoff just after JOIN with a one-tick delay to ensure clean respawn flow
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-            ServerPlayerEntity player = handler.getPlayer();
+            ServerPlayer player = handler.getPlayer();
             server.execute(() -> {
-                String portalName = consumePendingPortalTeleport(player.getUuid());
+                String portalName = consumePendingPortalTeleport(player.getUUID());
                 if (portalName != null) {
                     queueLoginHandoffTeleport(player, portalName);
                 } else {
@@ -255,14 +262,14 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
      */
     private void registerPlayerJoinListener() {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-            UUID playerId = handler.getPlayer().getUuid();
+            UUID playerId = handler.getPlayer().getUUID();
             playerJoinTimes.put(playerId, System.currentTimeMillis());
             LOGGER.info("Player {} joined, portal immunity active for {}ms", 
                        handler.getPlayer().getName().getString(), PORTAL_IMMUNITY_AFTER_JOIN_MS);
         });
         
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            UUID playerId = handler.getPlayer().getUuid();
+            UUID playerId = handler.getPlayer().getUUID();
             playerJoinTimes.remove(playerId);
             loginHandoffQueue.remove(playerId);
             LOGGER.debug("Removed join time tracking for disconnected player {}", 
@@ -270,8 +277,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         });
     }
 
-    private static void queueLoginHandoffTeleport(ServerPlayerEntity player, String portalName) {
-        loginHandoffQueue.put(player.getUuid(), new LoginHandoff(portalName, LOGIN_HANDOFF_DELAY_TICKS));
+    private static void queueLoginHandoffTeleport(ServerPlayer player, String portalName) {
+        loginHandoffQueue.put(player.getUUID(), new LoginHandoff(portalName, LOGIN_HANDOFF_DELAY_TICKS));
         suppressPortalInterceptor(player, "login handoff queued");
         LOGGER.info("Queued portal handoff '{}' for {} to fire in {} ticks", portalName, player.getName().getString(), LOGIN_HANDOFF_DELAY_TICKS);
     }
@@ -289,7 +296,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 return;
             }
             loginHandoffQueue.forEach((playerId, handoff) -> {
-                ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
+                ServerPlayer player = server.getPlayerList().getPlayer(playerId);
                 if (player == null) {
                     LOGGER.debug("Dropping queued login handoff for {} because player is no longer online", playerId);
                     loginHandoffQueue.remove(playerId);
@@ -349,20 +356,21 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 CustomPortalBuilder builder = CustomPortalBuilder.beginPortal();
                 
                 // Set both destination and return dimension to nether to make portal activatable
-                builder.destDimID(Identifier.of("minecraft", "the_nether"));
-                builder.returnDim(Identifier.of("minecraft", "overworld"), false);
+                builder.destDimID(Identifier.fromNamespaceAndPath("minecraft", "the_nether"));
+                builder.returnDim(Identifier.fromNamespaceAndPath("minecraft", "overworld"), false);
                 
                 builder.frameBlock(portal.frameBlock());
                 builder.lightWithItem(portal.lightWithItem());
                 builder.tintColor(portal.color());
 
                 builder.registerPreIgniteEvent((player, world, portalPos, framePos, portalIgnitionSource) -> {
-                    if (!(player instanceof ServerPlayerEntity serverPlayer)) {
+                    if (!(player instanceof ServerPlayer serverPlayer)) {
                         LOGGER.info("Blocked portal ignite for {} because igniter is not a player", portal.index());
                         return false;
                     }
 
-                    if (!serverPlayer.hasPermissionLevel(1)) {
+                    if (!(serverPlayer.permissions() instanceof net.minecraft.server.permissions.LevelBasedPermissionSet p)
+                            || p.level().id() < 1) {
                         LOGGER.info("Blocked portal ignite for {} by non-op player {}", portal.index(), serverPlayer.getName().getString());
                         return false;
                     }
@@ -375,15 +383,15 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                     LOGGER.info("Portal triggered: {} by entity: {}", portal.index(), entity.getName().getString());
                     
                     // Check if player is within join immunity period
-                    if (entity instanceof ServerPlayerEntity player) {
-                        if (isWithinJoinImmunityPeriod(player.getUuid())) {
+                    if (entity instanceof ServerPlayer player) {
+                        if (isWithinJoinImmunityPeriod(player.getUUID())) {
                             LOGGER.info("Player {} is within join immunity period, skipping portal detection", 
                                        player.getName().getString());
                             return SHOULDTP.CANCEL_TP;
                         }
                         
                         // Check if player has pending portal teleport - if so, skip portal detection
-                        if (hasPendingPortalTeleport(player.getUuid())) {
+                        if (hasPendingPortalTeleport(player.getUUID())) {
                             LOGGER.info("Player {} has pending portal teleport, skipping portal detection", 
                                        player.getName().getString());
                             return SHOULDTP.CANCEL_TP;
@@ -419,8 +427,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     }
 
     private void requestProxyTransfer(Entity entity, PortalRegistrationData portal) {
-        if (!(entity instanceof ServerPlayerEntity player)) {
-            LOGGER.warn("Entity is not a ServerPlayerEntity, cannot execute command");
+        if (!(entity instanceof ServerPlayer player)) {
+            LOGGER.warn("Entity is not a ServerPlayer, cannot execute command");
             return;
         }
         String target = resolveTargetServer(portal);
@@ -428,11 +436,11 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             LOGGER.warn("Portal {} has no resolvable target server; skipping proxy transfer", portal.index());
             return;
         }
-        if (!pendingPetTransferPreparations.add(player.getUuid())) {
+        if (!pendingPetTransferPreparations.add(player.getUUID())) {
             return;
         }
         prepareOptionalPetTransfer(player, target).whenComplete((ignored, failure) -> {
-            MinecraftServer server = player.getCommandSource().getServer();
+            MinecraftServer server = player.createCommandSourceStack().getServer();
             Runnable continueTransfer = () -> {
                 try {
                     if (failure != null) {
@@ -442,11 +450,11 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                         sendProxyTransfer(player, portal, target);
                     }
                 } finally {
-                    pendingPetTransferPreparations.remove(player.getUuid());
+                    pendingPetTransferPreparations.remove(player.getUUID());
                 }
             };
             if (server == null) {
-                pendingPetTransferPreparations.remove(player.getUuid());
+                pendingPetTransferPreparations.remove(player.getUUID());
             } else {
                 server.execute(continueTransfer);
             }
@@ -454,7 +462,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     }
 
     private void sendProxyTransfer(
-            ServerPlayerEntity player, PortalRegistrationData portal, String target) {
+            ServerPlayer player, PortalRegistrationData portal, String target) {
         try {
             String secret = CONFIG.portalRequestSecret();
             if (secret == null || secret.isBlank()) {
@@ -469,10 +477,10 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             long issuedAt = System.currentTimeMillis();
             String nonce = PortalRequestPayloadCodec.generateNonce();
             byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(
-                    player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce);
+                    player.getUUID(), target.trim(), sourcePortal, issuedAt, nonce);
             byte[] signature = PortalRequestSigner.hmacSha256(secret.trim(), unsigned);
             byte[] payload = PortalRequestPayloadCodec.encodeSigned(
-                    player.getUuid(), target.trim(), sourcePortal, issuedAt, nonce, signature);
+                    player.getUUID(), target.trim(), sourcePortal, issuedAt, nonce, signature);
             ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
             LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
         } catch (Exception failure) {
@@ -485,14 +493,14 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
      * proceeds unchanged when Pet Companion is absent or fails before committing a reservation.
      */
     private static CompletionStage<?> prepareOptionalPetTransfer(
-            ServerPlayerEntity player, String target) {
+            ServerPlayer player, String target) {
         if (!FabricLoader.getInstance().isModLoaded("pet_companion")) {
             return CompletableFuture.completedFuture(null);
         }
         try {
             Class<?> petMod = Class.forName("com.silver.aipets.fabric.PetCompanionMod");
             Object stage = petMod.getMethod(
-                            "preparePortalTransfer", ServerPlayerEntity.class, String.class)
+                            "preparePortalTransfer", ServerPlayer.class, String.class)
                     .invoke(null, player, target);
             if (stage instanceof CompletionStage<?> completionStage) {
                 return completionStage.toCompletableFuture().orTimeout(10, TimeUnit.SECONDS);
@@ -519,7 +527,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
      * Teleports the given player to the configured arrival location of the portal, including cross-world moves.
      * @return {@code true} if the teleport was performed successfully, {@code false} otherwise.
      */
-    static boolean teleportPlayerToArrival(ServerPlayerEntity player,
+    static boolean teleportPlayerToArrival(ServerPlayer player,
                                            PortalRegistrationData portal,
                                            String portalName,
                                            String context) {
@@ -528,22 +536,22 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             return false;
         }
 
-    ServerWorld currentWorld = player.getCommandSource().getWorld();
+    ServerLevel currentWorld = player.createCommandSourceStack().getLevel();
         String portalIndex = portal.index() != null ? portal.index() : portalName;
 
         LOGGER.info("Preparing teleport for player {} via portal {} ({}) from world {} at ({}, {}, {}) yaw={} pitch={} thread={}"
             , player.getName().getString()
             , portalIndex
             , context
-            , currentWorld != null ? currentWorld.getRegistryKey().getValue() : "unknown"
+            , currentWorld != null ? currentWorld.dimension().identifier() : "unknown"
             , player.getX()
             , player.getY()
             , player.getZ()
-            , player.getYaw()
-            , player.getPitch()
+            , player.getYRot()
+            , player.getXRot()
             , Thread.currentThread().getName());
 
-        MinecraftServer server = player.getCommandSource().getServer();
+        MinecraftServer server = player.createCommandSourceStack().getServer();
         if (server == null) {
             LOGGER.error("Unable to teleport player {} via portal {} because server reference was null", 
                     player.getName().getString(), portal.index());
@@ -558,13 +566,13 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             return false;
         }
 
-        ServerWorld targetWorld = resolveArrivalWorld(server, portal, portalName, context);
+        ServerLevel targetWorld = resolveArrivalWorld(server, portal, portalName, context);
         if (targetWorld == null) {
             return false;
         }
         LOGGER.info("Resolved target world for portal {}: {} (expected from config: '{}') ({})",
             portalIndex,
-                targetWorld.getRegistryKey().getValue(), 
+                targetWorld.dimension().identifier(), 
                 location.world(),
                 context);
 
@@ -574,41 +582,41 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
 
         int chunkX = (int) Math.floor(x) >> 4;
         int chunkZ = (int) Math.floor(z) >> 4;
-        boolean chunkLoaded = targetWorld.isChunkLoaded(chunkX, chunkZ);
+        boolean chunkLoaded = targetWorld.hasChunk(chunkX, chunkZ);
         LOGGER.info("Target chunk for portal {}: chunkX={}, chunkZ={}, loaded={} in world {} ({})",
-            portalIndex, chunkX, chunkZ, chunkLoaded, targetWorld.getRegistryKey().getValue(), context);
+            portalIndex, chunkX, chunkZ, chunkLoaded, targetWorld.dimension().identifier(), context);
 
         if (!chunkLoaded) {
             LOGGER.info("Target chunk not loaded, forcing load for portal {} at ({}, {}) in world {}",
-                portalIndex, chunkX, chunkZ, targetWorld.getRegistryKey().getValue());
+                portalIndex, chunkX, chunkZ, targetWorld.dimension().identifier());
             targetWorld.getChunk(chunkX, chunkZ);
         }
 
         LOGGER.debug("Computed teleport target for portal {}: world={} position=({}, {}, {}) velocity=(0.0, 0.0, 0.0) yaw={} pitch={} ({})",
             portalIndex,
-        targetWorld.getRegistryKey().getValue(),
+            targetWorld.dimension().identifier(),
         x,
         y,
         z,
-        player.getYaw(),
-        player.getPitch(),
+        player.getYRot(),
+        player.getXRot(),
         context);
         
         // Suppress PortalInterceptor for this teleport by marking the player
         suppressPortalInterceptor(player, "login handoff teleport");
         
     LOGGER.info("Calling player.teleport with target world {} pos=({}, {}, {}) yaw={} pitch={} ({})",
-        targetWorld.getRegistryKey().getValue(), x, y, z, player.getYaw(), player.getPitch(), context);
-    player.teleport(targetWorld,
+        targetWorld.dimension().identifier(), x, y, z, player.getYRot(), player.getXRot(), context);
+    player.teleportTo(targetWorld,
         x,
         y,
         z,
-        java.util.EnumSet.noneOf(PositionFlag.class),
-        player.getYaw(),
-        player.getPitch(),
+        java.util.EnumSet.noneOf(Relative.class),
+        player.getYRot(),
+        player.getXRot(),
         true);
     LOGGER.info("After teleport: player world={} pos=({}, {}, {}) ({})",
-        player.getCommandSource().getWorld().getRegistryKey().getValue(),
+        player.createCommandSourceStack().getLevel().dimension().identifier(),
         player.getX(), player.getY(), player.getZ(), context);
 
         if (player instanceof de.michiruf.serverportals.api.EntityPortalTracking tracking) {
@@ -620,7 +628,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         LOGGER.info("Teleported player {} to portal {} in world {} at ({}, {}, {}) [{}]",
             player.getName().getString(),
             portalIndex,
-                targetWorld.getRegistryKey().getValue(),
+                targetWorld.dimension().identifier(),
                 x,
                 y,
                 z,
@@ -628,7 +636,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         return true;
     }
 
-    private static ServerWorld resolveArrivalWorld(MinecraftServer server,
+    private static ServerLevel resolveArrivalWorld(MinecraftServer server,
                                                    PortalRegistrationData portal,
                                                    String portalName,
                                                    String context) {
@@ -637,14 +645,14 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         Identifier worldId = normalizeWorldIdentifier(rawWorld);
         LOGGER.debug("Resolving arrival world for portal {} (rawWorld='{}', normalized='{}') ({})",
                 portal.index(), rawWorld, worldId, context);
-        RegistryKey<World> worldKey = RegistryKey.of(RegistryKeys.WORLD, worldId);
-        ServerWorld targetWorld = server.getWorld(worldKey);
-        LOGGER.debug("Lookup result for world {}: {}", worldKey.getValue(), targetWorld != null ? "loaded" : "not loaded");
+        ResourceKey<Level> worldKey = ResourceKey.create(Registries.DIMENSION, worldId);
+        ServerLevel targetWorld = server.getLevel(worldKey);
+        LOGGER.debug("Lookup result for world {}: {}", worldKey.identifier(), targetWorld != null ? "loaded" : "not loaded");
         if (targetWorld == null) {
             LOGGER.warn("Portal {} requested world {} but it is not loaded; falling back to overworld ({})", 
                     portal.index(), worldId, context);
-            targetWorld = server.getOverworld();
-            LOGGER.debug("Fallback overworld registry key: {}", targetWorld.getRegistryKey().getValue());
+            targetWorld = server.overworld();
+            LOGGER.debug("Fallback overworld registry key: {}", targetWorld.dimension().identifier());
         }
         return targetWorld;
     }
@@ -652,7 +660,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     private static Identifier normalizeWorldIdentifier(String rawWorld) {
         if (rawWorld == null || rawWorld.isBlank()) {
             LOGGER.debug("normalizeWorldIdentifier: raw value '{}' treated as default overworld", rawWorld);
-            return Identifier.of("minecraft", "overworld");
+            return Identifier.fromNamespaceAndPath("minecraft", "overworld");
         }
 
         String trimmed = rawWorld.trim();
@@ -660,13 +668,13 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         switch (lower) {
             case "overworld":
             case "the_overworld":
-                return Identifier.of("minecraft", "overworld");
+                return Identifier.fromNamespaceAndPath("minecraft", "overworld");
             case "nether":
             case "the_nether":
-                return Identifier.of("minecraft", "the_nether");
+                return Identifier.fromNamespaceAndPath("minecraft", "the_nether");
             case "end":
             case "the_end":
-                return Identifier.of("minecraft", "the_end");
+                return Identifier.fromNamespaceAndPath("minecraft", "the_end");
             default:
                 Identifier parsed = Identifier.tryParse(trimmed);
                 LOGGER.debug("normalizeWorldIdentifier: attempting to parse custom world '{}' -> {}", trimmed, parsed);
@@ -674,14 +682,14 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                     return parsed;
                 }
                 LOGGER.warn("Could not parse world identifier '{}'; defaulting to minecraft:overworld", trimmed);
-                return Identifier.of("minecraft", "overworld");
+                return Identifier.fromNamespaceAndPath("minecraft", "overworld");
         }
     }
 
-    private static void suppressPortalInterceptor(ServerPlayerEntity player, String reason) {
+    private static void suppressPortalInterceptor(ServerPlayer player, String reason) {
         try {
             Class<?> interceptorClass = Class.forName("com.silver.enderfight.portal.PortalInterceptor");
-            java.lang.reflect.Method suppressMethod = interceptorClass.getMethod("suppressNextRedirect", ServerPlayerEntity.class);
+            java.lang.reflect.Method suppressMethod = interceptorClass.getMethod("suppressNextRedirect", ServerPlayer.class);
             suppressMethod.invoke(null, player);
             LOGGER.info("Suppressed PortalInterceptor for {} of {}", reason, player.getName().getString());
         } catch (Exception e) {

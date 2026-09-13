@@ -1,60 +1,45 @@
-import de.michiruf.gradle.findversion.FindVersion
-
 plugins {
     id 'java'
-    id 'fabric-loom' version '1.11.8'
+    id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT'
 }
 
 apply from: 'build.allprojects.gradle'
-apply from: 'build.versions.gradle'
 
-def minecraftVersion = project.minecraftVersion as String ?: '1.21.10'
-def minecraftVersionDefinitions = ext.minecraftVersionDefinitions
-def minecraftVersionDefinition = minecraftVersionDefinitions[minecraftVersion]
+def minecraftVersion = '26.2'
+def mappingsVersion = 'official'
+def fabricLoaderVersion = '0.19.3'
+def fabricApiVersion = '0.156.0+26.2'
+def polymerVersion = 'polymer-core:0.17.5+26.2'
 project.version = "${project.version}+${minecraftVersion}"
 
 sourceSets {
     main.java.srcDirs = [
-            'src/main/java',
-            "src/registry/${FindVersion.findClosestLowerOrEqualVersionInDirectory(file('src/registry'), minecraftVersion)}",
-            "src/message/${FindVersion.findClosestLowerOrEqualVersionInDirectory(file('src/message'), minecraftVersion)}",
-            "src/customportalapi-polymer/${FindVersion.findClosestLowerOrEqualVersionInDirectory(file('src/customportalapi-polymer'), minecraftVersion)}"
+            'src/main/java'
     ]
 }
 
 repositories {
     mavenCentral()
-    maven { url 'https://maven.wispforest.io' } // Owo config
-    maven { url 'https://maven.kyrptonaught.dev' } // Custom portal api
-    maven { url 'https://maven.nucleoid.xyz' } // Custom portal api transitive (polymer)
-    maven { url 'https://api.modrinth.com/maven' } // Custom portal api transitive (sodium)
+    maven { url 'https://maven.nucleoid.xyz' }
 }
 
 dependencies {
     // Minecraft and fabric
     minecraft "com.mojang:minecraft:${minecraftVersion}"
-    mappings "net.fabricmc:yarn:${minecraftVersionDefinition['mappings']}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${minecraftVersionDefinition['fabric']}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${minecraftVersionDefinition['fabricApi']}"
+    implementation "net.fabricmc:fabric-loader:${fabricLoaderVersion}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
+    implementation files('../MC-Mods/Util-Mods/MC-Portal-Protocol/build/libs/mc-portal-protocol-1.0.0.jar')
+    implementation include("eu.pb4:${polymerVersion}") { exclude group: 'net.fabricmc.fabric-api' }
 
-    modImplementation "com.silver:mc-portal-protocol:1.0.0"
-
-    // Owo config
-    modImplementation annotationProcessor("io.wispforest:owo-lib:${minecraftVersionDefinition['owo']}") { exclude group: 'net.fabricmc.fabric-api' }
-    // We could include owo-sentinel for auto download, see https://github.com/wisp-forest/owo-lib
-
-    // Custom portal api
-    modImplementation include("net.kyrptonaught:customportalapi:${minecraftVersionDefinition['customportalapi']}") { exclude group: 'net.fabricmc.fabric-api' }
-    modImplementation include("eu.pb4:${minecraftVersionDefinition['polymer']}") { exclude group: 'net.fabricmc.fabric-api' }
 }
 
 processResources {
     var replaceProperties = [
             version  : project.version,
             minecraft: minecraftVersion,
-            mappings : minecraftVersionDefinition['mappings'],
-            fabric   : minecraftVersionDefinition['fabric'],
-            fabricApi: minecraftVersionDefinition['fabricApi']
+            mappings : mappingsVersion,
+            fabric   : fabricLoaderVersion,
+            fabricApi: fabricApiVersion
     ]
     inputs.properties replaceProperties
     filteringCharset 'UTF-8'
@@ -63,7 +48,7 @@ processResources {
     }
 }
 
-def targetJavaVersion = 21
+def targetJavaVersion = 25
 tasks.withType(JavaCompile).configureEach {
     // ensure that the encoding is set to UTF-8, no matter what the system default is
     // this fixes some edge cases with special characters not displaying correctly

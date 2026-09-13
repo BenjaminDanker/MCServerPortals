@@ -1,9 +1,9 @@
 package de.michiruf.serverportals.config;
 
-import de.michiruf.serverportals.versioned.VersionedRegistry;
-import net.minecraft.block.Block;
-import net.minecraft.item.Item;
-import net.minecraft.util.Identifier;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.item.Item;
+import net.minecraft.resources.Identifier;
 
 /**
  * Configuration data for a single portal on this server.
@@ -60,11 +60,11 @@ public final class PortalRegistrationData {
     }
 
     public Block frameBlock() {
-        return VersionedRegistry.block().get(Identifier.tryParse(frameBlockId));
+        return BuiltInRegistries.BLOCK.getValue(Identifier.tryParse(frameBlockId));
     }
 
     public Item lightWithItem() {
-        return VersionedRegistry.item().get(Identifier.tryParse(lightWithItemId));
+        return BuiltInRegistries.ITEM.getValue(Identifier.tryParse(lightWithItemId));
     }
 
     public String index() {

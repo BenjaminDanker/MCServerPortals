@@ -5,14 +5,15 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import de.michiruf.serverportals.config.PortalRegistrationData;
-import de.michiruf.serverportals.versioned.VersionedMessageSender;
-import de.michiruf.serverportals.versioned.VersionedRegistry;
-import net.minecraft.command.CommandRegistryAccess;
-import net.minecraft.command.argument.BlockStateArgumentType;
-import net.minecraft.command.argument.ColorArgumentType;
-import net.minecraft.command.argument.ItemStackArgumentType;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.commands.CommandBuildContext;
+import net.minecraft.commands.arguments.blocks.BlockStateArgument;
+import net.minecraft.commands.arguments.HexColorArgument;
+import net.minecraft.commands.arguments.item.ItemArgument;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
 
 import java.util.ArrayList;
 import java.util.stream.Collectors;
@@ -30,16 +31,16 @@ import java.util.stream.Collectors;
  */
 public class Command {
 
-    public static void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher,
-                                        CommandRegistryAccess registry,
-                                        CommandManager.RegistrationEnvironment environment) {
-        LiteralCommandNode<ServerCommandSource> rootNode = CommandManager
+    public static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher,
+                                        CommandBuildContext registry,
+                                        Commands.CommandSelection environment) {
+        LiteralCommandNode<CommandSourceStack> rootNode = Commands
                 .literal("serverportals")
-                .requires(cmd -> cmd.hasPermissionLevel(4))
+                .requires(cmd -> cmd.permissions() instanceof LevelBasedPermissionSet p && p.level().id() >= 4)
                 .executes(context -> {
-                    VersionedMessageSender.send(context, "Usage: /serverportals list");
-                    VersionedMessageSender.send(context, "Usage: /serverportals register name frameBlock lightWith color command");
-                    VersionedMessageSender.send(context, "Usage: /serverportals unregister name");
+                    send(context, "Usage: /serverportals list");
+                    send(context, "Usage: /serverportals register name frameBlock lightWith color command");
+                    send(context, "Usage: /serverportals unregister name");
                     return 1;
                 })
                 .build();
@@ -50,11 +51,11 @@ public class Command {
         dispatcher.getRoot().addChild(rootNode);
     }
 
-    private static void registerReceivePortalCommand(LiteralCommandNode<ServerCommandSource> node) {
+    private static void registerReceivePortalCommand(LiteralCommandNode<CommandSourceStack> node) {
         ServerPortalsMod.LOGGER.debug("Registering receive-portal subcommand");
-        node.addChild(CommandManager
+        node.addChild(Commands
                 .literal("receive-portal")
-                .then(CommandManager.argument("portalName", StringArgumentType.word())
+                .then(Commands.argument("portalName", StringArgumentType.word())
                         .executes(context -> {
                             ServerPortalsMod.LOGGER.info("Receive-portal command executed");
                             return executeReceivePortalCommand(context);
@@ -63,7 +64,7 @@ public class Command {
                 .build());
     }
 
-    private static int executeReceivePortalCommand(CommandContext<ServerCommandSource> context) {
+    private static int executeReceivePortalCommand(CommandContext<CommandSourceStack> context) {
         try {
             var source = context.getSource();
             var player = source.getPlayer();
@@ -72,7 +73,7 @@ public class Command {
                 return 1;
             }
 
-            if (ServerPortalsMod.shouldSkipReceivePortal(player.getUuid())) {
+            if (ServerPortalsMod.shouldSkipReceivePortal(player.getUUID())) {
                 ServerPortalsMod.LOGGER.info("Skipping receive-portal teleport for {} because a recent handoff already moved them",
                         player.getName().getString());
                 return 0;
@@ -97,9 +98,7 @@ public class Command {
                                     portal.arrivalLocation().z());
 
                             var dest = portal.arrivalLocation();
-                            player.setPosition(dest.x(), dest.y(), dest.z());
-                            player.networkHandler.requestTeleport(dest.x(), dest.y(), dest.z(),
-                                    player.getYaw(), player.getPitch());
+                            player.teleportTo(dest.x(), dest.y(), dest.z());
 
                             // Clear portal tracking so player doesn't immediately trigger the portal again
                             if (player instanceof de.michiruf.serverportals.api.EntityPortalTracking tracking) {
@@ -124,9 +123,9 @@ public class Command {
         }
     }
 
-    private static void registerListCommand(LiteralCommandNode<ServerCommandSource> node) {
+    private static void registerListCommand(LiteralCommandNode<CommandSourceStack> node) {
         ServerPortalsMod.LOGGER.debug("Registering list subcommand");
-        node.addChild(CommandManager
+        node.addChild(Commands
                 .literal("list")
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.info("List command executed, processing execution");
@@ -135,7 +134,7 @@ public class Command {
                 .build());
     }
 
-    private static int executeListCommand(CommandContext<ServerCommandSource> context) {
+    private static int executeListCommand(CommandContext<CommandSourceStack> context) {
         try {
             var listString = ServerPortalsMod.CONFIG.portals() != null
                     ? ServerPortalsMod.CONFIG.portals().stream()
@@ -144,7 +143,7 @@ public class Command {
                     : "";
             if (listString.isEmpty())
                 listString = "None";
-            VersionedMessageSender.send(context, listString);
+            send(context, listString);
             return 0;
         } catch (Exception e) {
             ServerPortalsMod.LOGGER.error("Error executing list command", e);
@@ -152,20 +151,20 @@ public class Command {
         }
     }
 
-    private static void registerRegisterCommand(LiteralCommandNode<ServerCommandSource> node, CommandRegistryAccess registry) {
+    private static void registerRegisterCommand(LiteralCommandNode<CommandSourceStack> node, CommandBuildContext registry) {
         ServerPortalsMod.LOGGER.debug("Registering register subcommand");
-        node.addChild(CommandManager
+        node.addChild(Commands
                 .literal("register")
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.warn("Register command executed without required arguments");
-                    VersionedMessageSender.send(context, "Invalid usage. See /serverportals");
+                    send(context, "Invalid usage. See /serverportals");
                     return 1;
                 })
-                .then(CommandManager.argument("index", StringArgumentType.word())
-                        .then(CommandManager.argument("frameBlock", BlockStateArgumentType.blockState(registry))
-                                .then(CommandManager.argument("lightWith", ItemStackArgumentType.itemStack(registry))
-                                        .then(CommandManager.argument("color", ColorArgumentType.color())
-                                                .then(CommandManager.argument("command", StringArgumentType.string())
+                .then(Commands.argument("index", StringArgumentType.word())
+                        .then(Commands.argument("frameBlock", BlockStateArgument.block(registry))
+                                .then(Commands.argument("lightWith", ItemArgument.item(registry))
+                                        .then(Commands.argument("color", HexColorArgument.hexColor())
+                                                .then(Commands.argument("command", StringArgumentType.string())
                                                         .executes(context -> {
                                                             ServerPortalsMod.LOGGER.info("Register command executed with all arguments");
                                                             return executeRegisterCommand(context);
@@ -178,12 +177,12 @@ public class Command {
                 .build());
     }
 
-    private static int executeRegisterCommand(CommandContext<ServerCommandSource> context) {
+    private static int executeRegisterCommand(CommandContext<CommandSourceStack> context) {
         try {
             var index = StringArgumentType.getString(context, "index");
-            var frameBlock = BlockStateArgumentType.getBlockState(context, "frameBlock");
-            var lightWith = ItemStackArgumentType.getItemStackArgument(context, "lightWith");
-            var color = ColorArgumentType.getColor(context, "color");
+            var frameBlock = BlockStateArgument.getBlock(context, "frameBlock");
+            var lightWith = ItemArgument.getItem(context, "lightWith");
+            var color = HexColorArgument.getHexColor(context, "color");
             var command = StringArgumentType.getString(context, "command");
 
             // Create the list if null
@@ -196,20 +195,20 @@ public class Command {
                     .map(PortalRegistrationData::index)
                     .toList();
             if (registeredIndexes.contains(index)) {
-                VersionedMessageSender.send(context, "Portal with index " + index + " is already registered. Unregister it first");
+                send(context, "Portal with index " + index + " is already registered. Unregister it first");
                 return 2;
             }
 
             var portal = new PortalRegistrationData(
                     index,
-                    VersionedRegistry.block().getId(frameBlock.getBlockState().getBlock()).toString(),
-                    VersionedRegistry.item().getId(lightWith.getItem()).toString(),
-                    color.getColorValue() != null ? color.getColorValue() : 0,
+                    BuiltInRegistries.BLOCK.getKey(frameBlock.getState().getBlock()).toString(),
+                    BuiltInRegistries.ITEM.getKey(lightWith.item().value()).toString(),
+                    color != null ? color : 0,
                     command);
             ServerPortalsMod.CONFIG.portals().add(portal);
             ServerPortalsMod.CONFIG.save();
 
-            VersionedMessageSender.send(context, "Registered portal " + portal);
+            send(context, "Registered portal " + portal);
             printRestartInfo(context);
             return 0;
         } catch (Exception e) {
@@ -218,16 +217,16 @@ public class Command {
         }
     }
 
-    private static void registerUnregisterCommand(LiteralCommandNode<ServerCommandSource> node, CommandRegistryAccess registry) {
+    private static void registerUnregisterCommand(LiteralCommandNode<CommandSourceStack> node, CommandBuildContext registry) {
         ServerPortalsMod.LOGGER.debug("Registering unregister subcommand");
-        node.addChild(CommandManager
+        node.addChild(Commands
                 .literal("unregister")
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.warn("Unregister command executed without required arguments");
-                    VersionedMessageSender.send(context, "Invalid usage. See /serverportals");
+                    send(context, "Invalid usage. See /serverportals");
                     return 1;
                 })
-                .then(CommandManager.argument("index", StringArgumentType.word())
+                .then(Commands.argument("index", StringArgumentType.word())
                         .executes(context -> {
                             ServerPortalsMod.LOGGER.info("Unregister command executed with index argument");
                             return executeUnregisterCommand(context);
@@ -236,7 +235,7 @@ public class Command {
                 .build());
     }
 
-    private static int executeUnregisterCommand(CommandContext<ServerCommandSource> context) {
+    private static int executeUnregisterCommand(CommandContext<CommandSourceStack> context) {
         ServerPortalsMod.LOGGER.info("Executing /serverportals unregister command");
         try {
             var index = StringArgumentType.getString(context, "index");
@@ -245,7 +244,7 @@ public class Command {
             // Cancel if not list exists
             if (ServerPortalsMod.CONFIG.portals() == null) {
                 ServerPortalsMod.LOGGER.error("Portal list does not exist");
-                VersionedMessageSender.send(context, "Portal list does not exist");
+                send(context, "Portal list does not exist");
                 return 2;
             }
 
@@ -260,7 +259,7 @@ public class Command {
                         contained = ServerPortalsMod.CONFIG.portals().remove(portal);
                         removedCount++;
                         ServerPortalsMod.LOGGER.info("Unregistered portal {}", portal);
-                        VersionedMessageSender.send(context, "Unregistered portal " + portal);
+                        send(context, "Unregistered portal " + portal);
                     }
                 }
             } while (contained);
@@ -283,7 +282,16 @@ public class Command {
         }
     }
 
-    private static void printRestartInfo(CommandContext<ServerCommandSource> context) {
-        VersionedMessageSender.send(context, "For this configuration to take effect, restart the server");
+    private static void send(CommandContext<CommandSourceStack> context, String message) {
+        CommandSourceStack source = context.getSource();
+        if (source.getPlayer() != null) {
+            source.getPlayer().sendSystemMessage(Component.literal(message));
+        } else {
+            source.sendSystemMessage(Component.literal(message));
+        }
+    }
+
+    private static void printRestartInfo(CommandContext<CommandSourceStack> context) {
+        send(context, "For this configuration to take effect, restart the server");
     }
 }

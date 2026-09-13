@@ -1,9 +1,10 @@
 {
   "required": true,
-  "package": "net.kyrptonaught.servercustomportals.mixin",
+  "minVersion": "0.8",
+  "package": "net.kyrptonaught.customportalapi.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "VirtualPortalBlock"
+    "EntityPortalDetectionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

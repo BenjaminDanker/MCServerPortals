@@ -1,7 +1,7 @@
 package de.michiruf.serverportals.mixin;
 
 import de.michiruf.serverportals.api.EntityPortalTracking;
-import net.minecraft.entity.Entity;
+import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
