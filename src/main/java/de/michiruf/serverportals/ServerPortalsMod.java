@@ -58,11 +58,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     // Store player join times for immunity period
     private static final Map<UUID, Long> playerJoinTimes = new ConcurrentHashMap<>();
 
-    // Track recent handoff teleports to suppress duplicate receive-portal commands
-    private static final Map<UUID, Long> recentHandoffTeleports = new ConcurrentHashMap<>();
     // Prevent repeated portal ticks while an optional pet authority reservation is in flight.
     private static final Set<UUID> pendingPetTransferPreparations = ConcurrentHashMap.newKeySet();
-    private static final long HANDOFF_RECEIVE_SUPPRESSION_MS = 5_000;
 
     // Queue login handoff teleports to fire after the client finishes its initial chunk sync
     private static final Map<UUID, LoginHandoff> loginHandoffQueue = new ConcurrentHashMap<>();
@@ -71,8 +68,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     // Portal detection immunity period after join (milliseconds)
     private static final long PORTAL_IMMUNITY_AFTER_JOIN_MS = 2000;
     
-    private record PendingTeleport(String portalName, long timestampMs) {}
-    private record LoginHandoff(String portalName, int ticksRemaining) {}
+    private record PendingTeleport(UUID transferId, String portalName, long timestampMs) {}
+    private record LoginHandoff(UUID transferId, String portalName, int ticksRemaining) {}
     
     // Maximum age for pending teleports (5 seconds)
     private static final long PENDING_TELEPORT_MAX_AGE_MS = 5000;
@@ -97,9 +94,9 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
      * Store a pending portal teleport for a player.
      * This will be consumed when the player joins the server.
      */
-    public static void setPendingPortalTeleport(UUID playerId, String portalName) {
-        LOGGER.info("Setting pending portal teleport for player {} to portal {}", playerId, portalName);
-        pendingPortalTeleports.put(playerId, new PendingTeleport(portalName, System.currentTimeMillis()));
+    public static void setPendingPortalTeleport(UUID playerId, UUID transferId, String portalName) {
+        LOGGER.info("Setting pending portal transfer {} for player {} to portal {}", transferId, playerId, portalName);
+        pendingPortalTeleports.put(playerId, new PendingTeleport(transferId, portalName, System.currentTimeMillis()));
     }
     
     /**
@@ -120,35 +117,11 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         return false;
     }
 
-    private static void markRecentHandoffTeleport(UUID playerId) {
-        if (playerId != null) {
-            recentHandoffTeleports.put(playerId, System.currentTimeMillis());
-        }
-    }
-
-    public static boolean shouldSkipReceivePortal(UUID playerId) {
-        if (playerId == null) {
-            return false;
-        }
-        Long timestamp = recentHandoffTeleports.get(playerId);
-        if (timestamp == null) {
-            return false;
-        }
-        long age = System.currentTimeMillis() - timestamp;
-        if (age <= HANDOFF_RECEIVE_SUPPRESSION_MS) {
-            LOGGER.info("Suppressing receive-portal for {} - recent handoff teleport {}ms ago", playerId, age);
-            recentHandoffTeleports.remove(playerId);
-            return true;
-        }
-        recentHandoffTeleports.remove(playerId);
-        return false;
-    }
-    
     /**
      * Get and clear a pending portal teleport for a player.
      * Returns null if not set or if too old (expired).
      */
-    public static String consumePendingPortalTeleport(UUID playerId) {
+    public static PendingTeleport consumePendingPortalTeleport(UUID playerId) {
         PendingTeleport pending = pendingPortalTeleports.remove(playerId);
         if (pending != null) {
             long ageMs = System.currentTimeMillis() - pending.timestampMs();
@@ -159,7 +132,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             }
             LOGGER.info("Consumed pending portal teleport for player {} to portal {} (age: {}ms)", 
                        playerId, pending.portalName(), ageMs);
-            return pending.portalName();
+            return pending;
         }
         return null;
     }
@@ -181,7 +154,6 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 if (portalName.equals(portal.destinationPortalName())) {
                     LOGGER.info("  Found match by destinationPortalName: {}", portal.index());
                     if (teleportPlayerToArrival(player, portal, portalName, "login handoff")) {
-                        markRecentHandoffTeleport(player.getUUID());
                         return;
                     }
                 }
@@ -194,7 +166,6 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 if (portalName.equals(portal.index())) {
                     LOGGER.info("  Found match by index: {}", portal.index());
                     if (teleportPlayerToArrival(player, portal, portalName, "login handoff")) {
-                        markRecentHandoffTeleport(player.getUUID());
                         return;
                     }
                 }
@@ -223,16 +194,24 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                     }
 
                     try {
-                        boolean hasPortal = buf.readBoolean();
+                        int marker = buf.readUnsignedByte();
+                        boolean versionTwo = marker == 2;
+                        boolean hasPortal = versionTwo ? buf.readBoolean() : marker != 0;
                         if (!hasPortal) {
                             LOGGER.debug("Portal handoff response contained no portal");
                             return;
                         }
 
+                        UUID transferId = versionTwo ? buf.readUUID() : new UUID(0L, 0L);
                         String portalName = buf.readUtf(32767);
                         UUID playerId = buf.readUUID();
-                        setPendingPortalTeleport(playerId, portalName);
-                        LOGGER.info("Stored portal handoff '{}' for {}", portalName, playerId);
+                        long expiresAtMs = versionTwo ? buf.readLong() : System.currentTimeMillis() + PENDING_TELEPORT_MAX_AGE_MS;
+                        if (expiresAtMs <= System.currentTimeMillis()) {
+                            LOGGER.warn("Ignoring expired portal transfer {} for {}", transferId, playerId);
+                            return;
+                        }
+                        setPendingPortalTeleport(playerId, transferId, portalName);
+                        LOGGER.info("Stored portal transfer {} arrival '{}' for {}", transferId, portalName, playerId);
                     } catch (Exception ex) {
                         LOGGER.error("Failed to process portal handoff payload", ex);
                     }
@@ -247,9 +226,9 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayer player = handler.getPlayer();
             server.execute(() -> {
-                String portalName = consumePendingPortalTeleport(player.getUUID());
-                if (portalName != null) {
-                    queueLoginHandoffTeleport(player, portalName);
+                PendingTeleport pending = consumePendingPortalTeleport(player.getUUID());
+                if (pending != null) {
+                    queueLoginHandoffTeleport(player, pending.transferId(), pending.portalName());
                 } else {
                     LOGGER.debug("No pending portal handoff for {} on JOIN", player.getName().getString());
                 }
@@ -277,8 +256,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         });
     }
 
-    private static void queueLoginHandoffTeleport(ServerPlayer player, String portalName) {
-        loginHandoffQueue.put(player.getUUID(), new LoginHandoff(portalName, LOGIN_HANDOFF_DELAY_TICKS));
+    private static void queueLoginHandoffTeleport(ServerPlayer player, UUID transferId, String portalName) {
+        loginHandoffQueue.put(player.getUUID(), new LoginHandoff(transferId, portalName, LOGIN_HANDOFF_DELAY_TICKS));
         suppressPortalInterceptor(player, "login handoff queued");
         LOGGER.info("Queued portal handoff '{}' for {} to fire in {} ticks", portalName, player.getName().getString(), LOGIN_HANDOFF_DELAY_TICKS);
     }
@@ -306,10 +285,10 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 int remaining = handoff.ticksRemaining() - 1;
                 if (remaining <= 0) {
                     loginHandoffQueue.remove(playerId);
-                    LOGGER.info("Executing queued portal handoff '{}' for {}", handoff.portalName(), player.getName().getString());
+                    LOGGER.info("Executing queued portal transfer {} arrival '{}' for {}", handoff.transferId(), handoff.portalName(), player.getName().getString());
                     teleportToPortal(player, handoff.portalName());
                 } else {
-                    loginHandoffQueue.put(playerId, new LoginHandoff(handoff.portalName(), remaining));
+                    loginHandoffQueue.put(playerId, new LoginHandoff(handoff.transferId(), handoff.portalName(), remaining));
                 }
             });
         });
@@ -470,17 +449,17 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 return;
             }
             String configuredDestinationPortal = portal.destinationPortalName();
-            String sourcePortal = configuredDestinationPortal != null
+            String arrivalPortal = configuredDestinationPortal != null
                     && !configuredDestinationPortal.isBlank()
                     ? configuredDestinationPortal.trim()
                     : portal.index() == null ? "" : portal.index();
             long issuedAt = System.currentTimeMillis();
             String nonce = PortalRequestPayloadCodec.generateNonce();
             byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(
-                    player.getUUID(), target.trim(), sourcePortal, issuedAt, nonce);
+                    player.getUUID(), target.trim(), arrivalPortal, issuedAt, nonce);
             byte[] signature = PortalRequestSigner.hmacSha256(secret.trim(), unsigned);
             byte[] payload = PortalRequestPayloadCodec.encodeSigned(
-                    player.getUUID(), target.trim(), sourcePortal, issuedAt, nonce, signature);
+                    player.getUUID(), target.trim(), arrivalPortal, issuedAt, nonce, signature);
             ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
             LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
         } catch (Exception failure) {
