@@ -1,5 +1,7 @@
 package de.michiruf.serverportals;
 
+import com.silver.authorization.PermissionNodes;
+import com.silver.authorization.fabric.AuthorizationChecks;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -13,7 +15,6 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.permissions.LevelBasedPermissionSet;
 
 import java.util.ArrayList;
 import java.util.stream.Collectors;
@@ -36,7 +37,6 @@ public class Command {
                                         Commands.CommandSelection environment) {
         LiteralCommandNode<CommandSourceStack> rootNode = Commands
                 .literal("serverportals")
-                .requires(cmd -> cmd.permissions() instanceof LevelBasedPermissionSet p && p.level().id() >= 4)
                 .executes(context -> {
                     send(context, "Usage: /serverportals list");
                     send(context, "Usage: /serverportals register name frameBlock lightWith color command");
@@ -54,6 +54,7 @@ public class Command {
         ServerPortalsMod.LOGGER.debug("Registering list subcommand");
         node.addChild(Commands
                 .literal("list")
+                .requires(AuthorizationChecks.requires(PermissionNodes.PORTAL_REGISTRY_VIEW))
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.info("List command executed, processing execution");
                     return executeListCommand(context);
@@ -62,6 +63,10 @@ public class Command {
     }
 
     private static int executeListCommand(CommandContext<CommandSourceStack> context) {
+        if (!AuthorizationChecks.has(context.getSource(), PermissionNodes.PORTAL_REGISTRY_VIEW)) {
+            send(context, "You lack portal.registry.view.");
+            return 0;
+        }
         try {
             var listString = ServerPortalsMod.CONFIG.portals() != null
                     ? ServerPortalsMod.CONFIG.portals().stream()
@@ -82,6 +87,7 @@ public class Command {
         ServerPortalsMod.LOGGER.debug("Registering register subcommand");
         node.addChild(Commands
                 .literal("register")
+                .requires(AuthorizationChecks.requires(PermissionNodes.PORTAL_REGISTRY_MANAGE))
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.warn("Register command executed without required arguments");
                     send(context, "Invalid usage. See /serverportals");
@@ -105,6 +111,10 @@ public class Command {
     }
 
     private static int executeRegisterCommand(CommandContext<CommandSourceStack> context) {
+        if (!AuthorizationChecks.has(context.getSource(), PermissionNodes.PORTAL_REGISTRY_MANAGE)) {
+            send(context, "You lack portal.registry.manage.");
+            return 0;
+        }
         try {
             var index = StringArgumentType.getString(context, "index");
             var frameBlock = BlockStateArgument.getBlock(context, "frameBlock");
@@ -148,6 +158,7 @@ public class Command {
         ServerPortalsMod.LOGGER.debug("Registering unregister subcommand");
         node.addChild(Commands
                 .literal("unregister")
+                .requires(AuthorizationChecks.requires(PermissionNodes.PORTAL_REGISTRY_MANAGE))
                 .executes(context -> {
                     ServerPortalsMod.LOGGER.warn("Unregister command executed without required arguments");
                     send(context, "Invalid usage. See /serverportals");
@@ -163,6 +174,10 @@ public class Command {
     }
 
     private static int executeUnregisterCommand(CommandContext<CommandSourceStack> context) {
+        if (!AuthorizationChecks.has(context.getSource(), PermissionNodes.PORTAL_REGISTRY_MANAGE)) {
+            send(context, "You lack portal.registry.manage.");
+            return 0;
+        }
         ServerPortalsMod.LOGGER.info("Executing /serverportals unregister command");
         try {
             var index = StringArgumentType.getString(context, "index");

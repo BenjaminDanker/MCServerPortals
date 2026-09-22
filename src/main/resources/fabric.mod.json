@@ -35,6 +35,7 @@
     "minecraft": ">=${minecraft}",
     "fabricloader": ">=${fabric}",
     "fabric-api": "*",
+    "network_authorization": "*",
     "mc-portal-protocol": ">=1.0.0"
   }
 }

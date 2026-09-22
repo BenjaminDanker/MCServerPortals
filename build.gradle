@@ -28,6 +28,8 @@ dependencies {
     minecraft "com.mojang:minecraft:${minecraftVersion}"
     implementation "net.fabricmc:fabric-loader:${fabricLoaderVersion}"
     implementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
+    compileOnly project(':network-authorization')
+    compileOnly 'com.silver:authorization-common:0.1.0'
     implementation files('../MC-Mods/Util-Mods/MC-Portal-Protocol/build/libs/mc-portal-protocol-1.0.0.jar')
     implementation include("eu.pb4:${polymerVersion}") { exclude group: 'net.fabricmc.fabric-api' }
 

@@ -80,19 +80,6 @@ LogLevel is currently unused.
 }
 ```
 
-## Usage together with ProxyCommands
-
-ProxyCommands can be found [here](https://github.com/michiruf/MCProxyCommand). To create a portal to another server
-use the command:
-```
-/serverportals register NAME BLOCK ITEM COLOR "proxycommand \"server SERVERNAME\""
-```
-For example:
-```
-/serverportals register server_creative minecraft:bone_block minecraft:ender_eye black "proxycommand \"server creative\""
-```
-
-
 ## Known error reports in server logs
 
 The customportalapi will check if a portal without a dimension is registered and will print this on every launch of

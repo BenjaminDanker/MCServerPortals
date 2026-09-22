@@ -1,5 +1,7 @@
 package de.michiruf.serverportals;
 
+import com.silver.authorization.PermissionNodes;
+import com.silver.authorization.fabric.AuthorizationChecks;
 import de.michiruf.serverportals.config.Config;
 import de.michiruf.serverportals.config.PortalRegistrationData;
 import net.fabricmc.api.ClientModInitializer;
@@ -348,8 +350,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                         return false;
                     }
 
-                    if (!(serverPlayer.permissions() instanceof net.minecraft.server.permissions.LevelBasedPermissionSet p)
-                            || p.level().id() < 1) {
+                    if (!AuthorizationChecks.has(serverPlayer, PermissionNodes.PORTAL_USE)) {
                         LOGGER.info("Blocked portal ignite for {} by non-op player {}", portal.index(), serverPlayer.getName().getString());
                         return false;
                     }
