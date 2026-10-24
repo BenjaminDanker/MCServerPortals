@@ -25,6 +25,8 @@ public final class PortalRegistrationData {
     private String destinationPortalName;
     private String destinationServer;
     private ArrivalLocation arrivalLocation;
+    /** When true, any player may light this portal (with its item, or programmatically); otherwise lighting needs portal.use. */
+    private boolean playerIgnite;
 
     @SuppressWarnings("unused")
     // Suppress, because this will be used for serialization
@@ -85,6 +87,10 @@ public final class PortalRegistrationData {
 
     public String destinationServer() {
         return destinationServer;
+    }
+
+    public boolean playerIgnite() {
+        return playerIgnite;
     }
 
     public ArrivalLocation arrivalLocation() {

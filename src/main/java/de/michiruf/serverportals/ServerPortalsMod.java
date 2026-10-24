@@ -346,11 +346,15 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
 
                 builder.registerPreIgniteEvent((player, world, portalPos, framePos, portalIgnitionSource) -> {
                     if (!(player instanceof ServerPlayer serverPlayer)) {
+                        // A portal marked playerIgnite may also be lit by the server itself (a mod lighting a gate it built).
+                        if (portal.playerIgnite()) {
+                            return true;
+                        }
                         LOGGER.info("Blocked portal ignite for {} because igniter is not a player", portal.index());
                         return false;
                     }
 
-                    if (!AuthorizationChecks.has(serverPlayer, PermissionNodes.PORTAL_USE)) {
+                    if (!portal.playerIgnite() && !AuthorizationChecks.has(serverPlayer, PermissionNodes.PORTAL_USE)) {
                         LOGGER.info("Blocked portal ignite for {} by non-op player {}", portal.index(), serverPlayer.getName().getString());
                         return false;
                     }
@@ -416,8 +420,34 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             LOGGER.warn("Portal {} has no resolvable target server; skipping proxy transfer", portal.index());
             return;
         }
+        String configuredDestinationPortal = portal.destinationPortalName();
+        String arrivalPortal = configuredDestinationPortal != null
+                && !configuredDestinationPortal.isBlank()
+                ? configuredDestinationPortal.trim()
+                : portal.index() == null ? "" : portal.index();
+        requestTransfer(player, target, arrivalPortal, portal.index());
+    }
+
+    /**
+     * For mods that open their own gates rather than portal blocks: the same pet-aware, signed proxy transfer a portal makes.
+     * Returns false when the request cannot be made (no target, no secret, or one already pending for this player).
+     */
+    public static boolean transfer(ServerPlayer player, String targetServer, String arrivalPortal, String label) {
+        if (targetServer == null || targetServer.isBlank()) {
+            LOGGER.warn("{} has no target server; skipping proxy transfer", label);
+            return false;
+        }
+        String secret = com.silver.portalprotocol.PortalRequestSecret.resolve(CONFIG.portalRequestSecret());
+        if (secret == null || secret.isBlank()) {
+            LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for {}", label);
+            return false;
+        }
+        return requestTransfer(player, targetServer.trim(), arrivalPortal == null ? "" : arrivalPortal.trim(), label);
+    }
+
+    private static boolean requestTransfer(ServerPlayer player, String target, String arrivalPortal, String label) {
         if (!pendingPetTransferPreparations.add(player.getUUID())) {
-            return;
+            return false;
         }
         prepareOptionalPetTransfer(player, target).whenComplete((ignored, failure) -> {
             MinecraftServer server = player.createCommandSourceStack().getServer();
@@ -427,7 +457,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                         LOGGER.warn("Optional pet transfer preparation failed for {}; continuing portal transfer with pet left on source", player.getName().getString(), failure);
                     }
                     if (!player.isRemoved()) {
-                        sendProxyTransfer(player, portal, target);
+                        sendProxyTransfer(player, label, arrivalPortal, target);
                     }
                 } finally {
                     pendingPetTransferPreparations.remove(player.getUUID());
@@ -439,21 +469,16 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
                 server.execute(continueTransfer);
             }
         });
+        return true;
     }
 
-    private void sendProxyTransfer(
-            ServerPlayer player, PortalRegistrationData portal, String target) {
+    private static void sendProxyTransfer(ServerPlayer player, String label, String arrivalPortal, String target) {
         try {
-            String secret = CONFIG.portalRequestSecret();
+            String secret = com.silver.portalprotocol.PortalRequestSecret.resolve(CONFIG.portalRequestSecret());
             if (secret == null || secret.isBlank()) {
-                LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for portal {}", portal.index());
+                LOGGER.error("portalRequestSecret is not configured in server-portals.json; cannot request proxy transfer for {}", label);
                 return;
             }
-            String configuredDestinationPortal = portal.destinationPortalName();
-            String arrivalPortal = configuredDestinationPortal != null
-                    && !configuredDestinationPortal.isBlank()
-                    ? configuredDestinationPortal.trim()
-                    : portal.index() == null ? "" : portal.index();
             long issuedAt = System.currentTimeMillis();
             String nonce = PortalRequestPayloadCodec.generateNonce();
             byte[] unsigned = PortalRequestPayloadCodec.encodeUnsigned(
@@ -462,7 +487,7 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
             byte[] payload = PortalRequestPayloadCodec.encodeSigned(
                     player.getUUID(), target.trim(), arrivalPortal, issuedAt, nonce, signature);
             ServerPlayNetworking.send(player, new PortalRequestPayload(payload));
-            LOGGER.info("Portal {} requested proxy transfer for {} -> {}", portal.index(), player.getName().getString(), target);
+            LOGGER.info("{} requested proxy transfer for {} -> {}", label, player.getName().getString(), target);
         } catch (Exception failure) {
             LOGGER.error("Fatal error in sendProxyTransfer", failure);
         }
