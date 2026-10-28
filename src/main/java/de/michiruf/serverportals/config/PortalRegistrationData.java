@@ -118,6 +118,10 @@ public final class PortalRegistrationData {
         private double x;
         private double y;
         private double z;
+        /** Which way an arriving player faces (degrees; 0 = south, 90 = west, 180 = north, -90 = east); absent keeps theirs. */
+        private Float yaw;
+        /** Up/down look of an arriving player (degrees, -90 up to 90 down); absent keeps theirs. */
+        private Float pitch;
 
         @SuppressWarnings("unused")
         private ArrivalLocation() {
@@ -134,6 +138,14 @@ public final class PortalRegistrationData {
             this.x = x;
             this.y = y;
             this.z = z;
+        }
+
+        public Float yaw() {
+            return yaw;
+        }
+
+        public Float pitch() {
+            return pitch;
         }
 
         public String world() {

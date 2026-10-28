@@ -610,15 +610,17 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         // Suppress PortalInterceptor for this teleport by marking the player
         suppressPortalInterceptor(player, "login handoff teleport");
         
+    float yaw = location.yaw() != null ? location.yaw() : player.getYRot();
+    float pitch = location.pitch() != null ? location.pitch() : player.getXRot();
     LOGGER.info("Calling player.teleport with target world {} pos=({}, {}, {}) yaw={} pitch={} ({})",
-        targetWorld.dimension().identifier(), x, y, z, player.getYRot(), player.getXRot(), context);
+        targetWorld.dimension().identifier(), x, y, z, yaw, pitch, context);
     player.teleportTo(targetWorld,
         x,
         y,
         z,
         java.util.EnumSet.noneOf(Relative.class),
-        player.getYRot(),
-        player.getXRot(),
+        yaw,
+        pitch,
         true);
     LOGGER.info("After teleport: player world={} pos=({}, {}, {}) ({})",
         player.createCommandSourceStack().getLevel().dimension().identifier(),
