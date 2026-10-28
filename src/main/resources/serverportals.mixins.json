@@ -3,7 +3,8 @@
   "package": "de.michiruf.serverportals.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "EntityPortalTrackingMixin"
+    "EntityPortalTrackingMixin",
+    "PlayerListArrivalMixin"
   ],
   "injectors": {
     "defaultRequire": 1

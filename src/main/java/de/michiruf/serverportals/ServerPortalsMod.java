@@ -73,8 +73,8 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
     private record PendingTeleport(UUID transferId, String portalName, long timestampMs) {}
     private record LoginHandoff(UUID transferId, String portalName, int ticksRemaining) {}
     
-    // Maximum age for pending teleports (5 seconds)
-    private static final long PENDING_TELEPORT_MAX_AGE_MS = 5000;
+    // Maximum age for pending teleports: covers the proxy hop plus a cold target's configuration phase
+    private static final long PENDING_TELEPORT_MAX_AGE_MS = 30000;
 
     @Override
     public void onInitializeServer() {
@@ -139,6 +139,62 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         return null;
     }
     
+    /** The portal whose arrival location receives travellers announced under {@code portalName}, or null. */
+    private static PortalRegistrationData arrivalPortalFor(String portalName) {
+        if (CONFIG.portals() == null || portalName == null) {
+            return null;
+        }
+        for (PortalRegistrationData portal : CONFIG.portals()) {
+            if (portalName.equals(portal.destinationPortalName()) && portal.arrivalLocation() != null) {
+                return portal;
+            }
+        }
+        for (PortalRegistrationData portal : CONFIG.portals()) {
+            if (portalName.equals(portal.index()) && portal.arrivalLocation() != null) {
+                return portal;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Called while a joining player's saved data is read (PlayerListArrivalMixin): if a portal arrival is pending for
+     * them, returns a copy of that data placed at the arrival (position, dimension, and facing when configured), so the
+     * server spawns them there directly. Null when nothing is pending. The teleport after JOIN still runs and finds them
+     * already in place.
+     */
+    public static net.minecraft.nbt.CompoundTag placeAtPendingArrival(MinecraftServer server, UUID playerId, net.minecraft.nbt.CompoundTag saved) {
+        if (server == null || !hasPendingPortalTeleport(playerId)) {
+            return null;
+        }
+        PortalRegistrationData portal = arrivalPortalFor(pendingPortalTeleports.get(playerId).portalName());
+        if (portal == null) {
+            return null;
+        }
+        PortalRegistrationData.ArrivalLocation at = portal.arrivalLocation();
+        ServerLevel level = resolveArrivalWorld(server, portal, portal.index(), "pre-join placement");
+        net.minecraft.nbt.CompoundTag placed = saved.copy();
+        net.minecraft.nbt.ListTag pos = new net.minecraft.nbt.ListTag();
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(at.x()));
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(at.y()));
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(at.z()));
+        placed.put("Pos", pos);
+        placed.putString("Dimension", level.dimension().identifier().toString());
+        if (at.yaw() != null || at.pitch() != null) {
+            net.minecraft.nbt.ListTag rotation = new net.minecraft.nbt.ListTag();
+            rotation.add(net.minecraft.nbt.FloatTag.valueOf(at.yaw() != null ? at.yaw() : 0F));
+            rotation.add(net.minecraft.nbt.FloatTag.valueOf(at.pitch() != null ? at.pitch() : 0F));
+            placed.put("Rotation", rotation);
+        }
+        // A pre-placed player must not keep falling speed or a vehicle from where they were.
+        placed.remove("Motion");
+        placed.remove("RootVehicle");
+        placed.putDouble("fall_distance", 0D);
+        LOGGER.info("Placing {} at portal {} arrival before joining ({} {} {} in {})", playerId, portal.index(), at.x(), at.y(), at.z(),
+            level.dimension().identifier());
+        return placed;
+    }
+
     /**
      * Teleport a player to the destination coordinates of a portal.
      */
@@ -610,18 +666,23 @@ public class ServerPortalsMod implements DedicatedServerModInitializer, ClientMo
         // Suppress PortalInterceptor for this teleport by marking the player
         suppressPortalInterceptor(player, "login handoff teleport");
         
+    boolean alreadyThere = player.level() == targetWorld && player.distanceToSqr(x, y, z) < 2.25;
     float yaw = location.yaw() != null ? location.yaw() : player.getYRot();
     float pitch = location.pitch() != null ? location.pitch() : player.getXRot();
     LOGGER.info("Calling player.teleport with target world {} pos=({}, {}, {}) yaw={} pitch={} ({})",
         targetWorld.dimension().identifier(), x, y, z, yaw, pitch, context);
-    player.teleportTo(targetWorld,
-        x,
-        y,
-        z,
-        java.util.EnumSet.noneOf(Relative.class),
-        yaw,
-        pitch,
-        true);
+    if (alreadyThere) {
+        LOGGER.info("{} was placed at the arrival before joining; no teleport needed ({})", player.getName().getString(), context);
+    } else {
+        player.teleportTo(targetWorld,
+            x,
+            y,
+            z,
+            java.util.EnumSet.noneOf(Relative.class),
+            yaw,
+            pitch,
+            true);
+    }
     LOGGER.info("After teleport: player world={} pos=({}, {}, {}) ({})",
         player.createCommandSourceStack().getLevel().dimension().identifier(),
         player.getX(), player.getY(), player.getZ(), context);
