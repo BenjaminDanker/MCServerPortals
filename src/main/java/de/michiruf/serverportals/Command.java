@@ -41,12 +41,14 @@ public class Command {
                     send(context, "Usage: /serverportals list");
                     send(context, "Usage: /serverportals register name frameBlock lightWith color command");
                     send(context, "Usage: /serverportals unregister name");
+                    send(context, "Usage: /serverportals send player server");
                     return 1;
                 })
                 .build();
         registerListCommand(rootNode);
         registerRegisterCommand(rootNode, registry);
         registerUnregisterCommand(rootNode, registry);
+        registerSendCommand(rootNode);
         dispatcher.getRoot().addChild(rootNode);
     }
 
@@ -152,6 +154,32 @@ public class Command {
             ServerPortalsMod.LOGGER.error("Error executing register command", e);
             return 1;
         }
+    }
+
+    /**
+     * /serverportals send player server: moves a player on this server to another one through the proxy, the same signed
+     * transfer a portal makes (a sleeping target is woken while they wait in the lobby). Used by the home page's admin side,
+     * which types it into the server console.
+     */
+    private static void registerSendCommand(LiteralCommandNode<CommandSourceStack> node) {
+        node.addChild(Commands
+                .literal("send")
+                .requires(AuthorizationChecks.requires(PermissionNodes.PORTAL_REGISTRY_MANAGE))
+                .then(Commands.argument("player", StringArgumentType.word())
+                        .then(Commands.argument("server", StringArgumentType.word())
+                                .executes(context -> {
+                                    String name = StringArgumentType.getString(context, "player");
+                                    String target = StringArgumentType.getString(context, "server");
+                                    var player = context.getSource().getServer().getPlayerList().getPlayerByName(name);
+                                    if (player == null) {
+                                        send(context, name + " is not on this server.");
+                                        return 0;
+                                    }
+                                    boolean ok = ServerPortalsMod.transfer(player, target, "", "admin send of " + name);
+                                    send(context, ok ? "Sending " + name + " to " + target + "." : "Could not send " + name + " to " + target + " (see the log).");
+                                    return ok ? 1 : 0;
+                                })))
+                .build());
     }
 
     private static void registerUnregisterCommand(LiteralCommandNode<CommandSourceStack> node, CommandBuildContext registry) {
